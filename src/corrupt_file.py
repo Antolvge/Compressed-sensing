@@ -1,0 +1,85 @@
+import numpy as np
+from random import randrange
+import matplotlib.pyplot as plt
+
+class MethodError(Exception):
+    pass
+
+#Create a corrupt image with only some of data points with a micro-paths pattern
+def create_mask_micro(image, coverage, k):
+    if coverage > 1 or coverage < 0:
+        raise ValueError("The coverage must be between 0 and 1")
+    if not isinstance(k, int):
+        raise ValueError("k must be an integer")
+    
+    l_row = len(image[0])
+    n_pix = len(image) * len(image[0]) # In the case of rectangle images (not for AFM but SEM?)
+    pix_cov = n_pix * coverage # Number of pixel with non-zero measurement
+    n_paths = int(pix_cov // k) # Number of micro-paths
+
+    corrupt_img = np.zeros_like(image)
+    for i in range(n_paths):
+        p0 = randrange(n_pix-k+1) # Select a starting point for the micro-path
+        t = 0
+        while (p0%l_row + k > l_row) or (corrupt_img[p0//l_row][p0%l_row] != 0) or (corrupt_img[p0//l_row][p0%l_row+k-1] != 0): # Verify that it doesn't overlap with another path and that it isn't at the end of a row
+            p0 = randrange(n_pix-k+1)
+            t += 1
+            if t > 50:
+                raise MethodError("The coverage is probably to high and the micropaths are not the most appropriate technique")
+        for j in range(k):
+            corrupt_img[p0//l_row][p0%l_row+j] = image[p0//l_row][p0%l_row+j]
+    return corrupt_img
+
+# Simulate a measurement where only 1 every 2 pixels is measured in every direction. In that case, only a quarter of the image is measured.
+def create_mask_quarter(image):
+    n = len(image)
+    corrupt_img = np.zeros((n,n))
+    for i in range(0,n,2):
+        for j in range(0,n,2):
+            corrupt_img[i,j] = image[i,j] # Only take 1 every 2 pixels 
+    return corrupt_img
+
+
+
+if __name__ == "__main__":
+
+    im_file = "C:/Users/alavigne/OneDrive - Asociacion Cic Nanogune/Documents/AFM/Github/cs_afm_reconstruction-master/data/1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145.txt"
+
+    with open(im_file, 'r', encoding='latin1') as f:
+        lines = f.readlines()[4:]  # Skip 4-line header
+    
+    data = [float(val) for line in lines for val in line.strip().split()] # This part doesn't work for rectangle images. One should find the length of the rows first.
+    n = np.sqrt(len(data))
+    if not n.is_integer():
+        raise ValueError(f"Expected a square-shaped image")
+    image = np.array(data).reshape((int(n), int(n)))
+
+
+    # Type of corrupt image. For now u-paths or quarter
+    c_type = 'u-paths' 
+
+    if c_type == 'quarter':
+        extension = '_quarter'
+        corrupt_img = create_mask_quarter(image)
+    elif c_type == 'u-paths':
+        coverage = 0.5 # Fraction of the surface measured
+        k = 10 # Length of the micro-paths
+        extension = str(int(coverage*100)) + "_1"
+        corrupt_img = create_mask_micro(image, coverage, k)
+    else:
+        raise ValueError(f"the algorithm {c_type} is not recognized. Try 'quarter' or 'u-paths' instead.")
+
+
+    # Comparison plot between original and corrupted images
+    plt.figure(figsize=(12, 6))
+    fig, (ax1, ax2) = plt.subplots(1, 2, layout='constrained')
+    norm = ax1.imshow(image, cmap="hot")
+    corrupt = ax2.imshow(corrupt_img, cmap='hot')
+    fig.colorbar(corrupt, label='Height (%)', location="right")
+    fig.suptitle('Comparaison')
+    plt.show()
+
+
+    # File saving
+    output_file = im_file[:-4] + "_corrupt" + extension + ".txt"
+    np.savetxt(output_file, corrupt_img, fmt='%.4f', delimiter="\t")
