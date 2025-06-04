@@ -92,6 +92,14 @@ def block_tv(corrupt, b):
             print(f"Analysis block {k}/{n_box}...")
             block = reconstruct_tv(corrupt[i:i+b,j:j+b])
             rec_img[i:i+b,j:j+b] = block
+    
+    # Remove the pixels that are way out of range
+    if rec_img.max() > 130:
+        for i in range(n):
+            for j in range(n):
+                if rec_img[i,j] > 130 or rec_img[i,j] < -30:
+                    rec_img[i,j] = 0
+
     return rec_img
 
 # Total variation minimization of an image separated in blocks with an overlap of 25% between 2 consecutive blocks
@@ -127,21 +135,25 @@ def block_tv_25pc(corrupt, b):
     for i in range(0,l_blocks_row,3*b//4):
         for j in range(0,l_blocks_row,3*b//4):
             k += 1
-            print(f"Analysis block {k}/{t_block}...")
+            if k%10 == 0:
+                print(f"Analysis block {k}/{t_block}...")
             block = reconstruct_tv(corrupt[i:i+b,j:j+b])
             rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block
     if add_block:
         for i in range(0,l_blocks_row,3*b//4):
             k += 1
-            print(f"Analysis block {k}/{t_block}...")
+            if k%10 == 0:
+                print(f"Analysis block {k}/{t_block}...")
             block_right = reconstruct_tv(corrupt[n-b:n,i:i+b])
             rec_img[n-b:n,i:i+b] = rec_img[n-b:n,i:i+b] + block_right
             k += 1
-            print(f"Analysis block {k}/{t_block}...")
+            if k&10 == 0:
+                print(f"Analysis block {k}/{t_block}...")
             block_down = reconstruct_tv(corrupt[i:i+b,n-b:n])
             rec_img[i:i+b,n-b:n] = rec_img[i:i+b,n-b:n] + block_down
         k += 1
-        print(f"Analysis block {k}/{t_block}...")
+        if k%10 == 0:
+            print(f"Analysis block {k}/{t_block}...")
         block  = reconstruct_tv(corrupt[n-b:n,n-b:n])
         rec_img[n-b:n,n-b:n] = rec_img[n-b:n,n-b:n] + block
     rec_img = rec_img/weight # Get the average value for each pixel
@@ -157,14 +169,14 @@ def block_tv_25pc(corrupt, b):
 
 if __name__ == "__main__":
 
-    b = 32 # Size of the blocks
+    b = 16 # Size of the blocks
 
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     DATA_DIR = os.path.join(BASE_DIR, "data")
     IMG_DIR = os.path.join(BASE_DIR, "image")
 
     file_origin = "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145.txt"
-    file_corrupt = "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145_corrupt50_1.txt"
+    file_corrupt = "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145_corrupt25_5.txt"
     l_og = len(file_origin) - 4
     suffix = file_corrupt[l_og:-4]
 
@@ -172,7 +184,7 @@ if __name__ == "__main__":
     corrupt_image = load_afm_txt(os.path.join(DATA_DIR, file_corrupt))
 
 #    image = load_afm_txt(os.path.join(DATA_DIR, "c.txt"))
-#    corrupt_image = load_afm_txt(os.path.join(DATA_DIR, "c4.txt"))
+#    corrupt_image = load_afm_txt(os.path.join(DATA_DIR, "c3.txt"))
 
     # Visualize corrupted input
     plt.imshow(corrupt_image, cmap='hot')
@@ -184,7 +196,8 @@ if __name__ == "__main__":
 
 
     # Reconstruct
-    rec_img = block_tv_25pc(corrupt_image, b)
+    #rec_img = block_tv_25pc(corrupt_image, b)
+    rec_img = block_tv_25pc(corrupt_image,b)
 
     # Calculation of PSNR
     n = len(rec_img)
@@ -198,6 +211,7 @@ if __name__ == "__main__":
     ssim1 = ssim(image, rec_img, data_range = max_amp)
     print("\n" + f"The SSIM between the original and reconstructed images is {'%0.3f' %ssim1}." + "\n")
 
+    # Normalization of the reconstructed image
     rec_img = (rec_img - rec_img.min()) / (rec_img.max() - rec_img.min()) * 100
 
 
@@ -217,5 +231,5 @@ if __name__ == "__main__":
     plt.imshow(rec_img, cmap='hot')
     plt.colorbar()
 
-    plt.savefig(os.path.join(IMG_DIR, f"{n}px_{b}px-box_tv_overlap{suffix}.png"))
+    plt.savefig(os.path.join(IMG_DIR, f"{n}px_{b}px-box_tv_overlap_no-extreme{suffix}.png"))
     plt.show()
