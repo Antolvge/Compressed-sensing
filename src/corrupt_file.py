@@ -52,7 +52,8 @@ def create_mask_quarter(image):
 
 if __name__ == "__main__":
 
-    im_file = "C:/Users/alavigne/OneDrive - Asociacion Cic Nanogune/Documents/AFM/Github/cs_afm_reconstruction-master/data/1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145.txt"
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    DATA_DIR = os.path.join(BASE_DIR, "data")
     file = "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145.txt"
     im_file = os.path.join(DATA_DIR, file)
 
