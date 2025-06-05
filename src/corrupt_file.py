@@ -1,6 +1,7 @@
 import numpy as np
 from random import randrange
 import matplotlib.pyplot as plt
+import os
 
 class MethodError(Exception):
     pass
@@ -19,18 +20,19 @@ def create_mask_micro(image, coverage, k):
 
     corrupt_img = np.zeros_like(image)
     for i in range(n_paths):
-        p0 = randrange(n_pix-k+1) # Select a starting point for the micro-path
+        row_p = randrange(len(image)) # Select a starting point for the micro-path
+        col_p = randrange(l_row)
         t = 0
         # Verify that it isn't at the en of a row, that it doesn't overlap with another path and that there is enough space between 2 paths
-        while (p0%l_row + k > l_row) or (corrupt_img[p0//l_row][p0%l_row] != 0) or (corrupt_img[p0//l_row][p0%l_row-s] != 0) or (corrupt_img[p0//l_row][p0%l_row+k-1] != 0) or (corrupt_img[p0//l_row][p0%l_row+k-1+s] != 0): 
-            p0 = randrange(n_pix-k+1)
+        while (col_p + k > l_row) or (corrupt_img[row_p, col_p] != 0) or (corrupt_img[row_p, col_p+k-1] != 0) or (col_p >= s and corrupt_img[row_p, col_p-s] != 0)  or (col_p < l_row- k -s and corrupt_img[row_p, col_p+k-1+s] != 0): 
+            row_p = randrange(len(image))
+            col_p = randrange(l_row)
             t += 1
             if t > 50:
                 raise MethodError("The coverage is probably too high and the micropaths are not the most appropriate technique")
         for j in range(k):
-            corrupt_img[p0//l_row][p0%l_row+j] = image[p0//l_row][p0%l_row+j]
+            corrupt_img[row_p][col_p+j] = image[row_p][col_p+j]
     return corrupt_img
-
 
 
 # Simulate a measurement where only 1 every 2 pixels is measured in every direction. In that case, only a quarter of the image is measured.
@@ -50,7 +52,10 @@ def create_mask_quarter(image):
 
 if __name__ == "__main__":
 
-    im_file = "C:/Users/alavigne/OneDrive - Asociacion Cic Nanogune/Documents/AFM/Github/cs_afm_reconstruction-master/data/1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145.txt"
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    DATA_DIR = os.path.join(BASE_DIR, "data")
+    file = "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145.txt"
+    im_file = os.path.join(DATA_DIR, file)
 
     with open(im_file, 'r', encoding='latin1') as f:
         lines = f.readlines()
@@ -70,10 +75,10 @@ if __name__ == "__main__":
         extension = '_quarter_' + str(begin)
         corrupt_img = create_mask_quarter(image)
     elif c_type == 'u-paths':
-        coverage = 0.5 # Fraction of the surface measured
-        k = 20 # Length of the micro-paths
+        coverage = 0.4 # Fraction of the surface measured
+        k = 15 # Length of the micro-paths
         s = 6 # Space between 2 micro-paths
-        extension = str(int(coverage*100)) + "_k" + str(k) + "_1"
+        extension = str(int(coverage*100)) + "_k" + str(k) + "_2"
         corrupt_img = create_mask_micro(image, coverage, k)
     else:
         raise ValueError(f"the algorithm {c_type} is not recognized. Try 'quarter' or 'u-paths' instead.")
