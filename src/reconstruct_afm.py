@@ -102,11 +102,8 @@ def block_tv(corrupt, b):
 
     return rec_img
 
-# Total variation minimization of an image separated in blocks with an overlap of 25% between 2 consecutive blocks
-def block_tv_25pc(corrupt, b):
+def block_overlap_uniform(corrupt, b):
     n = len(corrupt)
-    # Count the number of block containing each pixel
-    weight = np.ones((n,n)) # Number of time a pixel appears in a block (1, 2 or 4)
     m = (n-0.25*b)/(0.75*b) # Number of blocks in a row
     # Test to see if all the last block is at the end of the row.
     # If not, we will add another block that will cover the last bit but also part of the block before.
@@ -115,6 +112,8 @@ def block_tv_25pc(corrupt, b):
     else:
         add_block = False
     m = int(m)
+    # Count the number of block containing each pixel
+    weight = np.ones((n,n)) # Number of time a pixel appears in a block (1, 2 or 4)
     tf_b = 3*b//4 # 3/4th of a block: periodicity of the cube overlap
     for i in range(1,m):
         for k in range(b//4): # Assume the overlap of the blocks is 25 %
@@ -139,6 +138,7 @@ def block_tv_25pc(corrupt, b):
                 print(f"Analysis block {k}/{t_block}...")
             block = reconstruct_tv(corrupt[i:i+b,j:j+b])
             rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block
+
     if add_block:
         for i in range(0,l_blocks_row,3*b//4):
             k += 1
@@ -156,7 +156,169 @@ def block_tv_25pc(corrupt, b):
             print(f"Analysis block {k}/{t_block}...")
         block  = reconstruct_tv(corrupt[n-b:n,n-b:n])
         rec_img[n-b:n,n-b:n] = rec_img[n-b:n,n-b:n] + block
+
     rec_img = rec_img/weight # Get the average value for each pixel
+
+    if rec_img.max() > 500:
+        for i in range(n):
+            for j in range(n):
+                if rec_img[i,j] > 130 or rec_img[i,j] < -30:
+                    rec_img[i,j] = 0
+    
+    return rec_img
+
+
+
+# Total variation minimization of an image separated in blocks with an overlap of 25% between 2 consecutive blocks
+def block_overlap_gradient(corrupt, b):
+    n = len(corrupt)
+    
+    m = (n-0.25*b)/(0.75*b) # Number of blocks in a row
+    # Test to see if all the last block is at the end of the row.
+    # If not, we will add another block that will cover the last bit but also part of the block before.
+    if not m.is_integer():
+        add_block = True
+    else:
+        add_block = False
+    m = int(m)
+
+    factor = b//4 - 1 # Number of non-zero rows and columns in the overlapping parts of the block
+    dic_blocks = {'b_middle' : np.ones((b,b)), 
+                  'b_left' : np.ones((b,b)), 
+                  'b_right' : np.ones((b,b)), 
+                  'b_top' : np.ones((b,b)), 
+                  'b_bottom' : np.ones((b,b)),
+                  'b_top_left' : np.ones((b,b)),
+                  'b_top_right' : np.ones((b,b)),
+                  'b_bottom_left' : np.ones((b,b)),
+                  'b_bottom_right' : np.ones((b,b))}
+
+    for i in range(b//4):
+        for key, block in dic_blocks.items():
+            if key not in ('b_left', 'b_top_left', 'b_bottom_left') :
+                block[:,i] = block[:,i] * i/factor
+            if key not in ('b_right', 'b_top_right', 'b_bottom_right') :
+                block[:,-1-i] = block[:,-1-i] * i/factor
+            if key not in ('b_top', 'b_top_left', 'b_top_right') :
+                block[i,:] = block[i,:] * i/factor
+            if key not in ('b_bottom', 'b_bottom_left', 'b_bottom_right'):
+                block[-1-i,:] = block[-1-i,:] * i/factor
+    
+    # This first paving with add_block minimizes the changes from the original algorithm.
+    # Here, only the pixels that are not already covered by the other blocks are added. all the others are put to zero.
+    if add_block:
+        dic_blocks_add = {'b_right_add': np.zeros((b,b)),
+                          'b_bottom_add': np.zeros((b,b)),
+                          'b_top_right_add': np.zeros((b,b)),
+                          'b_bottom_left_add': np.zeros((b,b)),
+                          'b_bottom_corner_add': np.zeros((b,b)),
+                          'b_right_corner_add': np.zeros((b,b)),
+                          'b_corner_add': np.zeros((b,b))}
+
+        for key, block in dic_blocks_add.items():
+            if 'right' in key:
+                block[:,-b//4:] = 1
+            elif 'bottom' in key:
+                block[-b//4:,:] = 1
+            else:
+                block[-b//4:,-b//4:] = 1
+
+            for i in range(b//4):
+                if 'right' in key and 'top' not in key:
+                    block[i,:] = block[i,:] * i/factor
+                if 'right' in key and 'corner' not in key:
+                    block[-1-i,:] = block[-1-i,:] * i/factor
+                if 'bottom' in key and 'left' not in key:
+                    block[:,i] = block[:,i] * i/factor
+                if 'bottom' in key and 'corner' not in key:
+                    block[:,-1-i] = block[:,-1-i] * i/factor
+
+    rec_img = np.zeros((n,n))
+    k = 0
+    l_blocks_row = 3*m*b//4 # Space taken by the blocks in a row
+    t_block = m**2 # Total number of blocks 
+    if add_block:
+        t_block = t_block + 2*m + 1
+
+    for i in range(0,l_blocks_row,3*b//4):
+        for j in range(0,l_blocks_row,3*b//4):
+            k += 1
+            if k%10 == 0:
+                print(f"Analysis block {k}/{t_block}...")
+            block = reconstruct_tv(corrupt[i:i+b,j:j+b])
+            # Multiply by the appropriate factor matrix (middle, side or corner) before adding the block to the final image.
+            if i == 0:
+                if j == 0:
+                    rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_top_left']
+                elif j == l_blocks_row - 3*b//4:
+                    rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_top_right']
+                else:
+                    rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_top']
+            elif i == l_blocks_row - 3*b//4:
+                if j == 0:
+                    rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_bottom_left']
+                elif j == l_blocks_row - 3*b//4:
+                    rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_bottom_right']
+                else:
+                    rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_bottom']
+            elif j == 0:
+                rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_left']
+            elif j == l_blocks_row - 3*b//4:
+                rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_right']
+            else:
+                rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_middle']
+    
+    # This feature doesn't work yet
+    if add_block:
+        # Block on the top right corner
+        k += 1
+        if k%10 == 0:
+            print(f"Analysis block {k}/{t_block}...")
+        block_right = reconstruct_tv(corrupt[:b,n-b:n])
+        rec_img[:b,n-b:n] = rec_img[:b,n-b:n] + block_right*dic_blocks_add['b_top_right_add']
+
+        # Block on the bottom left corner
+        k += 1
+        if k%10 == 0:
+            print(f"Analysis block {k}/{t_block}...")
+        block_right = reconstruct_tv(corrupt[n-b:n,:b])
+        rec_img[n-b:n,:b] = rec_img[n-b:n,:b] + block_right*dic_blocks_add['b_bottom_left_add']
+
+        for i in range(3*b//4, l_blocks_row-3*b//4, 3*b//4):
+            # Blocks on the right edge
+            k += 1
+            if k%10 == 0:
+                print(f"Analysis block {k}/{t_block}...")
+            block_right = reconstruct_tv(corrupt[i:i+b,n-b:n])
+            rec_img[i:i+b,n-b:n] = rec_img[i:i+b,n-b:n] + block_right*dic_blocks_add['b_right_add']
+
+            # Blocks on the bottome edge
+            k += 1
+            if k&10 == 0:
+                print(f"Analysis block {k}/{t_block}...")
+            block_down = reconstruct_tv(corrupt[n-b:n,i:i+b])
+            rec_img[n-b:n,i:i+b] = rec_img[n-b:n,i:i+b] + block_down*dic_blocks_add['b_bottom_add']
+        
+        # Penultimate block on the right edge
+        k += 1
+        if k%10 == 0:
+            print(f"Analysis block {k}/{t_block}...")
+        block  = reconstruct_tv(corrupt[n-5*b//4:n-b//4, n-b:n])
+        rec_img[n-5*b//4:n-b//4, n-b:n] = rec_img[n-5*b//4:n-b//4, n-b:n] + block*dic_blocks_add['b_right_corner_add']
+
+        # Penultimate block on the bottom edge
+        k += 1
+        if k%10 == 0:
+            print(f"Analysis block {k}/{t_block}...")
+        block  = reconstruct_tv(corrupt[n-b:n, n-5*b//4:n-b//4])
+        rec_img[n-b:n, n-5*b//4:n-b//4] = rec_img[n-b:n, n-5*b//4:n-b//4] + block*dic_blocks_add['b_bottom_corner_add']
+
+        # Block on the bottom right corner
+        k += 1
+        if k%10 == 0:
+            print(f"Analysis block {k}/{t_block}...")
+        block  = reconstruct_tv(corrupt[n-b:n,n-b:n])
+        rec_img[n-b:n,n-b:n] = rec_img[n-b:n,n-b:n] + block*dic_blocks_add['b_corner_add']
     
     if rec_img.max() > 500:
         for i in range(n):
@@ -164,40 +326,48 @@ def block_tv_25pc(corrupt, b):
                 if rec_img[i,j] > 130 or rec_img[i,j] < -30:
                     rec_img[i,j] = 0
     
-    return rec_img 
+    return rec_img
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 if __name__ == "__main__":
 
-    b = 16 # Size of the blocks
+    b = 32 # Size of the blocks
 
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     DATA_DIR = os.path.join(BASE_DIR, "data")
     IMG_DIR = os.path.join(BASE_DIR, "image")
 
     file_origin = "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145.txt"
-    file_corrupt = "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145_corrupt25_5.txt"
+    file_corrupt = "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145_corrupt50_1.txt"
     l_og = len(file_origin) - 4
     suffix = file_corrupt[l_og:-4]
 
     image = load_afm_txt(os.path.join(DATA_DIR, file_origin))
     corrupt_image = load_afm_txt(os.path.join(DATA_DIR, file_corrupt))
 
-#    image = load_afm_txt(os.path.join(DATA_DIR, "c.txt"))
-#    corrupt_image = load_afm_txt(os.path.join(DATA_DIR, "c3.txt"))
-
     # Visualize corrupted input
     plt.imshow(corrupt_image, cmap='hot')
     plt.colorbar(label='Height (z)')
     plt.title('Corrupted scan')
-
     plt.show()
 
 
 
     # Reconstruct
     #rec_img = block_tv_25pc(corrupt_image, b)
-    rec_img = block_tv_25pc(corrupt_image,b)
+    rec_img = block_overlap_gradient(corrupt_image,b)
 
     # Calculation of PSNR
     n = len(rec_img)
@@ -212,11 +382,11 @@ if __name__ == "__main__":
     print("\n" + f"The SSIM between the original and reconstructed images is {'%0.3f' %ssim1}." + "\n")
 
     # Normalization of the reconstructed image
-    rec_img = (rec_img - rec_img.min()) / (rec_img.max() - rec_img.min()) * 100
+#    rec_img = (rec_img - rec_img.min()) / (rec_img.max() - rec_img.min()) * 100
 
 
 
-    # Visualize
+    # Visualization
     plt.figure(figsize=(18, 6), layout='constrained')
     plt.subplot(1, 3, 1)
     plt.title('Partially Measured Image')
@@ -231,5 +401,5 @@ if __name__ == "__main__":
     plt.imshow(rec_img, cmap='hot')
     plt.colorbar()
 
-    plt.savefig(os.path.join(IMG_DIR, f"{n}px_{b}px-box_tv_overlap_no-extreme{suffix}.png"))
+    plt.savefig(os.path.join(IMG_DIR, f"{n}px_{b}px-box_tv_overlap_gradient{suffix}.png"))
     plt.show()
