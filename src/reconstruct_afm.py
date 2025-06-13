@@ -4,6 +4,8 @@ from scipy.fftpack import dct, idct
 import cvxpy as cp
 import os
 from skimage.metrics import structural_similarity as ssim
+import pylops
+import pyproximal as pyprox
 
 
 def skip_header(file_path):
@@ -78,6 +80,38 @@ def reconstruct_l1(corrupt):
 
     x_rec = x.value.reshape((n, n))
     return idct2(x_rec)  # Reconstructed image in spatial domain
+
+# Use the FISTA solver (which, from the first tests, is faster than the other solver but a bit less efficient)
+def reconstruct_fista(corrupt):
+    """Reconstruct an AFM image from compressed measurements using a mix of L2 and TV minimization in the DCT domain."""
+    if corrupt.max() == 300:
+        mask = (corrupt != 300) # Tip lifted means no data
+    else:
+        mask = (corrupt != 0)  # Tip lifted means no data
+    n = len(corrupt)
+    y = corrupt[mask]  # Measured data
+
+    # 2D DCT basis flattened
+    Psi = np.kron(dct(np.eye(n), norm='ortho'), dct(np.eye(n), norm='ortho'))
+    Phi = Psi[mask.flatten(), :]  # Select only rows corresponding to available data
+    # Create the operator "x: Phi @ x" to optimize the calculation
+    Phi = pylops.MatrixMult(Phi)
+
+#    eps = 1
+#    rec_img, _, _ = pylops.optimization.sparsity.fista(Phi, y, eps=eps, niter=100)
+#    rec_img = idct2(rec_img.reshape((n, n)))
+
+    maxit = 100
+    eps = 1
+    tv = pyprox.proximal.TV(dims=(n,n))
+    l2 = pyprox.proximal.L2(Op=Phi, b=y)
+
+    rec_img = pyprox.optimization.primal.ProximalGradient(l2, tv, tau=0.95, x0=np.zeros(n*n),
+                       epsg=eps, niter=maxit, acceleration='fista')
+
+    rec_img = idct2(rec_img.reshape((n, n)))
+
+    return rec_img
 
 
 # Total variation minimization of an image separated in blocks
@@ -245,7 +279,7 @@ def block_overlap_gradient(corrupt, b):
             k += 1
             if k%10 == 0:
                 print(f"Analysis block {k}/{t_block}...")
-            block = reconstruct_tv(corrupt[i:i+b,j:j+b])
+            block = reconstruct_fista(corrupt[i:i+b,j:j+b])
             # Multiply by the appropriate factor matrix (middle, side or corner) before adding the block to the final image.
             if i == 0:
                 if j == 0:
@@ -268,20 +302,19 @@ def block_overlap_gradient(corrupt, b):
             else:
                 rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_middle']
     
-    # This feature doesn't work yet
     if add_block:
         # Block on the top right corner
         k += 1
         if k%10 == 0:
             print(f"Analysis block {k}/{t_block}...")
-        block_right = reconstruct_tv(corrupt[:b,n-b:n])
+        block_right = reconstruct_fista(corrupt[:b,n-b:n])
         rec_img[:b,n-b:n] = rec_img[:b,n-b:n] + block_right*dic_blocks_add['b_top_right_add']
 
         # Block on the bottom left corner
         k += 1
         if k%10 == 0:
             print(f"Analysis block {k}/{t_block}...")
-        block_right = reconstruct_tv(corrupt[n-b:n,:b])
+        block_right = reconstruct_fista(corrupt[n-b:n,:b])
         rec_img[n-b:n,:b] = rec_img[n-b:n,:b] + block_right*dic_blocks_add['b_bottom_left_add']
 
         for i in range(3*b//4, l_blocks_row-3*b//4, 3*b//4):
@@ -289,37 +322,38 @@ def block_overlap_gradient(corrupt, b):
             k += 1
             if k%10 == 0:
                 print(f"Analysis block {k}/{t_block}...")
-            block_right = reconstruct_tv(corrupt[i:i+b,n-b:n])
+            block_right = reconstruct_fista(corrupt[i:i+b,n-b:n])
             rec_img[i:i+b,n-b:n] = rec_img[i:i+b,n-b:n] + block_right*dic_blocks_add['b_right_add']
 
-            # Blocks on the bottome edge
+            # Blocks on the bottom edge
             k += 1
             if k&10 == 0:
                 print(f"Analysis block {k}/{t_block}...")
-            block_down = reconstruct_tv(corrupt[n-b:n,i:i+b])
+            block_down = reconstruct_fista(corrupt[n-b:n,i:i+b])
             rec_img[n-b:n,i:i+b] = rec_img[n-b:n,i:i+b] + block_down*dic_blocks_add['b_bottom_add']
         
         # Penultimate block on the right edge
         k += 1
         if k%10 == 0:
             print(f"Analysis block {k}/{t_block}...")
-        block  = reconstruct_tv(corrupt[n-5*b//4:n-b//4, n-b:n])
+        block  = reconstruct_fista(corrupt[n-5*b//4:n-b//4, n-b:n])
         rec_img[n-5*b//4:n-b//4, n-b:n] = rec_img[n-5*b//4:n-b//4, n-b:n] + block*dic_blocks_add['b_right_corner_add']
 
         # Penultimate block on the bottom edge
         k += 1
         if k%10 == 0:
             print(f"Analysis block {k}/{t_block}...")
-        block  = reconstruct_tv(corrupt[n-b:n, n-5*b//4:n-b//4])
+        block  = reconstruct_fista(corrupt[n-b:n, n-5*b//4:n-b//4])
         rec_img[n-b:n, n-5*b//4:n-b//4] = rec_img[n-b:n, n-5*b//4:n-b//4] + block*dic_blocks_add['b_bottom_corner_add']
 
         # Block on the bottom right corner
         k += 1
         if k%10 == 0:
             print(f"Analysis block {k}/{t_block}...")
-        block  = reconstruct_tv(corrupt[n-b:n,n-b:n])
+        block  = reconstruct_fista(corrupt[n-b:n,n-b:n])
         rec_img[n-b:n,n-b:n] = rec_img[n-b:n,n-b:n] + block*dic_blocks_add['b_corner_add']
     
+    # Remove the pixels out of range that sometimes appear with a low coverage and th 16 px blocks
     if rec_img.max() > 500:
         for i in range(n):
             for j in range(n):
@@ -343,7 +377,7 @@ def block_overlap_gradient(corrupt, b):
 
 if __name__ == "__main__":
 
-    b = 32 # Size of the blocks
+    b = 16 # Size of the blocks
 
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -366,8 +400,8 @@ if __name__ == "__main__":
 
 
     # Reconstruct
-    #rec_img = block_tv_25pc(corrupt_image, b)
     rec_img = block_overlap_gradient(corrupt_image,b)
+
 
     # Calculation of PSNR
     n = len(rec_img)
@@ -401,5 +435,5 @@ if __name__ == "__main__":
     plt.imshow(rec_img, cmap='hot')
     plt.colorbar()
 
-    plt.savefig(os.path.join(IMG_DIR, f"{n}px_{b}px-box_tv_overlap_gradient{suffix}.png"))
+#    plt.savefig(os.path.join(IMG_DIR, f"{n}px_{b}px-box_tv_overlap_gradient{suffix}.png"))
     plt.show()
