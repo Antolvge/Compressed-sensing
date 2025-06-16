@@ -81,7 +81,7 @@ def reconstruct_l1(corrupt):
     x_rec = x.value.reshape((n, n))
     return idct2(x_rec)  # Reconstructed image in spatial domain
 
-# Use the FISTA solver (which, from the first tests, is faster than the other solver but a bit less efficient)
+
 def reconstruct_fista(corrupt):
     """Reconstruct an AFM image from compressed measurements using a mix of L2 and TV minimization in the DCT domain."""
     if corrupt.max() == 300:
@@ -97,15 +97,14 @@ def reconstruct_fista(corrupt):
     # Create the operator "x: Phi @ x" to optimize the calculation
     Phi = pylops.MatrixMult(Phi)
 
-#    eps = 1
-#    rec_img, _, _ = pylops.optimization.sparsity.fista(Phi, y, eps=eps, niter=100)
-#    rec_img = idct2(rec_img.reshape((n, n)))
+    eps = 1
+    maxit = 100
+
+#    rec_img, _, _ = pylops.optimization.sparsity.fista(Phi, y, eps=eps, niter=150)
 
     maxit = 100
-    eps = 1
     tv = pyprox.proximal.TV(dims=(n,n))
     l2 = pyprox.proximal.L2(Op=Phi, b=y)
-
     rec_img = pyprox.optimization.primal.ProximalGradient(l2, tv, tau=0.95, x0=np.zeros(n*n),
                        epsg=eps, niter=maxit, acceleration='fista')
 
@@ -116,6 +115,7 @@ def reconstruct_fista(corrupt):
 
 # Total variation minimization of an image separated in blocks
 def block_tv(corrupt, b):
+    """Reconstruct an AFM image from compressed measurements using the TV minimization on paving sub-blocks"""
     n = len(corrupt)
     rec_img = np.zeros((n,n))
     n_box = (n//b)**2
@@ -137,6 +137,7 @@ def block_tv(corrupt, b):
     return rec_img
 
 def block_overlap_uniform(corrupt, b):
+    """Reconstruct an AFM image from compressed measurements using the TV minimization on uniformly ovelapping sub-blocks"""
     n = len(corrupt)
     m = (n-0.25*b)/(0.75*b) # Number of blocks in a row
     # Test to see if all the last block is at the end of the row.
@@ -205,6 +206,7 @@ def block_overlap_uniform(corrupt, b):
 
 # Total variation minimization of an image separated in blocks with an overlap of 25% between 2 consecutive blocks
 def block_overlap_gradient(corrupt, b):
+    """Reconstruct an AFM image from compressed measurements using the TV minimization on gradiently ovelapping sub-blocks"""
     n = len(corrupt)
     
     m = (n-0.25*b)/(0.75*b) # Number of blocks in a row
@@ -353,7 +355,7 @@ def block_overlap_gradient(corrupt, b):
         block  = reconstruct_fista(corrupt[n-b:n,n-b:n])
         rec_img[n-b:n,n-b:n] = rec_img[n-b:n,n-b:n] + block*dic_blocks_add['b_corner_add']
     
-    # Remove the pixels out of range that sometimes appear with a low coverage and th 16 px blocks
+    # Remove the pixels out of range that sometimes appear with a low coverage and the 16 px blocks
     if rec_img.max() > 500:
         for i in range(n):
             for j in range(n):
@@ -377,7 +379,7 @@ def block_overlap_gradient(corrupt, b):
 
 if __name__ == "__main__":
 
-    b = 16 # Size of the blocks
+    b = 32 # Size of the blocks
 
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -385,18 +387,18 @@ if __name__ == "__main__":
 
     file_origin = "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145.txt"
     file_corrupt = "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145_corrupt50_1.txt"
-    l_og = len(file_origin) - 4
-    suffix = file_corrupt[l_og:-4]
+    len_og = len(file_origin) - 4
+    suffix = file_corrupt[len_og:-4] # type of corruption
 
     image = load_afm_txt(os.path.join(DATA_DIR, file_origin))
     corrupt_image = load_afm_txt(os.path.join(DATA_DIR, file_corrupt))
+
 
     # Visualize corrupted input
     plt.imshow(corrupt_image, cmap='hot')
     plt.colorbar(label='Height (z)')
     plt.title('Corrupted scan')
     plt.show()
-
 
 
     # Reconstruct
@@ -411,7 +413,7 @@ if __name__ == "__main__":
     print("\n" + f"The PSNR between the original and reconstructed images is {'%0.2f' % psnr} dB." + "\n")
 
     # Calculation of SSIM
-    # This function is excluding the edges for the calculation of ssim. Default is 3 rows and columns on each side ((7-1)/2)
+    # This function is excluding the edges for the calculation of ssim. Default is 3 rows and columns on each side ((7-1)/2 in code)
     ssim1 = ssim(image, rec_img, data_range = max_amp)
     print("\n" + f"The SSIM between the original and reconstructed images is {'%0.3f' %ssim1}." + "\n")
 
