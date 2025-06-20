@@ -32,8 +32,6 @@ def dct2(x): # 2D Discrete Cosine Transform
 def idct2(x): # 2D Inverse DCT
     return idct(idct(x.T, norm='ortho').T, norm='ortho')
 
-
-
 def reconstruct_tv(corrupt):
     """Reconstruct an AFM image from compressed measurements using Total Variation minimization in the DCT domain."""
     if corrupt.max() == 300:
@@ -49,6 +47,28 @@ def reconstruct_tv(corrupt):
     
     x = cp.Variable(n**2)
     objective = cp.Minimize(cp.tv(x.reshape((n,n), order='C')))
+    constraints = [Phi @ x == y]
+    prob = cp.Problem(objective, constraints)
+    prob.solve()
+
+    x_rec = x.value.reshape((n, n))
+    return idct2(x_rec)  # Reconstructed image in spatial domain
+
+def reconstruct_tvl1(corrupt):
+    """Reconstruct an AFM image from compressed measurements using Total Variation minimization in the DCT domain."""
+    if corrupt.max() == 300:
+        mask = (corrupt != 300)
+    else:
+        mask = (corrupt != 0)  # Tip lifted means no data
+    n = len(corrupt)
+    y = corrupt[mask]  # Measured data
+
+    # 2D DCT basis flattened
+    Psi = np.kron(dct(np.eye(n, dtype=np.float32), norm='ortho'), dct(np.eye(n, dtype=np.float32), norm='ortho'))
+    Phi = Psi[mask.flatten(), :]  # Select only rows corresponding to available data
+    
+    x = cp.Variable(n**2)
+    objective = cp.Minimize(cp.tv(x.reshape((n,n), order='C')) + cp.norm1(x))
     constraints = [Phi @ x == y]
     prob = cp.Problem(objective, constraints)
     prob.solve()
@@ -98,15 +118,14 @@ def reconstruct_fista(corrupt):
     Phi = pylops.MatrixMult(Phi)
 
     eps = 1
-    maxit = 100
+    maxit = 200
 
-#    rec_img, _, _ = pylops.optimization.sparsity.fista(Phi, y, eps=eps, niter=150)
+    rec_img, _, _ = pylops.optimization.sparsity.fista(Phi, y, eps=eps, niter=150)
 
-    maxit = 100
-    tv = pyprox.proximal.TV(dims=(n,n))
-    l2 = pyprox.proximal.L2(Op=Phi, b=y)
-    rec_img = pyprox.optimization.primal.ProximalGradient(l2, tv, tau=0.95, x0=np.zeros(n*n),
-                       epsg=eps, niter=maxit, acceleration='fista')
+#    tv = pyprox.proximal.TV(dims=(n,n))
+#    l2 = pyprox.proximal.L2(Op=Phi, b=y)
+#    rec_img = pyprox.optimization.primal.ProximalGradient(l2, tv, tau=0.95, x0=np.zeros(n*n),
+#                       epsg=eps, niter=maxit, acceleration='fista')
 
     rec_img = idct2(rec_img.reshape((n, n)))
 
@@ -205,8 +224,19 @@ def block_overlap_uniform(corrupt, b):
 
 
 # Total variation minimization of an image separated in blocks with an overlap of 25% between 2 consecutive blocks
-def block_overlap_gradient(corrupt, b):
+def block_overlap_gradient(corrupt, b, method):
     """Reconstruct an AFM image from compressed measurements using the TV minimization on gradiently ovelapping sub-blocks"""
+    
+    # Select the minimization algorithm for the reconstruction
+    reconstruction_functions = {'tv': reconstruct_tv,
+                               'l1': reconstruct_l1,
+                               'fista': reconstruct_fista,
+                               'tvl1': reconstruct_tvl1}
+    reconstruct_func = reconstruction_functions.get(method)
+    # Check if the function exists in the dictionary
+    if reconstruct_func is None:
+        raise ValueError("Invalid reconstruction method specified. Choose either 'tv', 'l1', 'tvl1' or 'fista'.")
+    
     n = len(corrupt)
     
     m = (n-0.25*b)/(0.75*b) # Number of blocks in a row
@@ -281,7 +311,7 @@ def block_overlap_gradient(corrupt, b):
             k += 1
             if k%10 == 0:
                 print(f"Analysis block {k}/{t_block}...")
-            block = reconstruct_fista(corrupt[i:i+b,j:j+b])
+            block = reconstruct_func(corrupt[i:i+b,j:j+b])
             # Multiply by the appropriate factor matrix (middle, side or corner) before adding the block to the final image.
             if i == 0:
                 if j == 0:
@@ -309,14 +339,14 @@ def block_overlap_gradient(corrupt, b):
         k += 1
         if k%10 == 0:
             print(f"Analysis block {k}/{t_block}...")
-        block_right = reconstruct_fista(corrupt[:b,n-b:n])
+        block_right = reconstruct_func(corrupt[:b,n-b:n])
         rec_img[:b,n-b:n] = rec_img[:b,n-b:n] + block_right*dic_blocks_add['b_top_right_add']
 
         # Block on the bottom left corner
         k += 1
         if k%10 == 0:
             print(f"Analysis block {k}/{t_block}...")
-        block_right = reconstruct_fista(corrupt[n-b:n,:b])
+        block_right = reconstruct_func(corrupt[n-b:n,:b])
         rec_img[n-b:n,:b] = rec_img[n-b:n,:b] + block_right*dic_blocks_add['b_bottom_left_add']
 
         for i in range(3*b//4, l_blocks_row-3*b//4, 3*b//4):
@@ -324,35 +354,35 @@ def block_overlap_gradient(corrupt, b):
             k += 1
             if k%10 == 0:
                 print(f"Analysis block {k}/{t_block}...")
-            block_right = reconstruct_fista(corrupt[i:i+b,n-b:n])
+            block_right = reconstruct_func(corrupt[i:i+b,n-b:n])
             rec_img[i:i+b,n-b:n] = rec_img[i:i+b,n-b:n] + block_right*dic_blocks_add['b_right_add']
 
             # Blocks on the bottom edge
             k += 1
             if k&10 == 0:
                 print(f"Analysis block {k}/{t_block}...")
-            block_down = reconstruct_fista(corrupt[n-b:n,i:i+b])
+            block_down = reconstruct_func(corrupt[n-b:n,i:i+b])
             rec_img[n-b:n,i:i+b] = rec_img[n-b:n,i:i+b] + block_down*dic_blocks_add['b_bottom_add']
         
         # Penultimate block on the right edge
         k += 1
         if k%10 == 0:
             print(f"Analysis block {k}/{t_block}...")
-        block  = reconstruct_fista(corrupt[n-5*b//4:n-b//4, n-b:n])
+        block  = reconstruct_func(corrupt[n-5*b//4:n-b//4, n-b:n])
         rec_img[n-5*b//4:n-b//4, n-b:n] = rec_img[n-5*b//4:n-b//4, n-b:n] + block*dic_blocks_add['b_right_corner_add']
 
         # Penultimate block on the bottom edge
         k += 1
         if k%10 == 0:
             print(f"Analysis block {k}/{t_block}...")
-        block  = reconstruct_fista(corrupt[n-b:n, n-5*b//4:n-b//4])
+        block  = reconstruct_func(corrupt[n-b:n, n-5*b//4:n-b//4])
         rec_img[n-b:n, n-5*b//4:n-b//4] = rec_img[n-b:n, n-5*b//4:n-b//4] + block*dic_blocks_add['b_bottom_corner_add']
 
         # Block on the bottom right corner
         k += 1
         if k%10 == 0:
             print(f"Analysis block {k}/{t_block}...")
-        block  = reconstruct_fista(corrupt[n-b:n,n-b:n])
+        block  = reconstruct_func(corrupt[n-b:n,n-b:n])
         rec_img[n-b:n,n-b:n] = rec_img[n-b:n,n-b:n] + block*dic_blocks_add['b_corner_add']
     
     # Remove the pixels out of range that sometimes appear with a low coverage and the 16 px blocks
@@ -380,13 +410,16 @@ def block_overlap_gradient(corrupt, b):
 if __name__ == "__main__":
 
     b = 32 # Size of the blocks
+    method = 'tv' # Type of minimization between tv, l1, fista and tvl1
 
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     DATA_DIR = os.path.join(BASE_DIR, "data")
     IMG_DIR = os.path.join(BASE_DIR, "image")
 
     file_origin = "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145.txt"
-    file_corrupt = "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145_corrupt50_1.txt"
+    file_corrupt = "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145_corrupt50_k15_s6_1.txt"
+#    file_origin = "c.txt"
+#    file_corrupt = "c4.txt"
     len_og = len(file_origin) - 4
     suffix = file_corrupt[len_og:-4] # type of corruption
 
@@ -402,8 +435,7 @@ if __name__ == "__main__":
 
 
     # Reconstruct
-    rec_img = block_overlap_gradient(corrupt_image,b)
-
+    rec_img = block_overlap_gradient(corrupt_image, b, method)
 
     # Calculation of PSNR
     n = len(rec_img)
@@ -437,5 +469,5 @@ if __name__ == "__main__":
     plt.imshow(rec_img, cmap='hot')
     plt.colorbar()
 
-#    plt.savefig(os.path.join(IMG_DIR, f"{n}px_{b}px-box_tv_overlap_gradient{suffix}.png"))
+#    plt.savefig(os.path.join(IMG_DIR, f"{n}px_{b}px-box_{method}_overlap_gradient{suffix}.png"))
     plt.show()
