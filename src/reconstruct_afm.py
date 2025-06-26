@@ -54,6 +54,7 @@ def reconstruct_tv(corrupt):
     x_rec = x.value.reshape((n, n))
     return idct2(x_rec)  # Reconstructed image in spatial domain
 
+
 def reconstruct_tvl1(corrupt):
     """Reconstruct an AFM image from compressed measurements using Total Variation minimization in the DCT domain."""
     if corrupt.max() == 300:
@@ -120,7 +121,7 @@ def reconstruct_fista(corrupt):
     eps = 1
     maxit = 200
 
-    rec_img, _, _ = pylops.optimization.sparsity.fista(Phi, y, eps=eps, niter=150)
+    rec_img, _, _ = pylops.optimization.sparsity.fista(Phi, y, eps=eps, niter=400)
 
 #    tv = pyprox.proximal.TV(dims=(n,n))
 #    l2 = pyprox.proximal.L2(Op=Phi, b=y)
@@ -249,7 +250,7 @@ def block_overlap_gradient(corrupt, b, method):
     m = int(m)
 
     factor = b//4 - 1 # Number of non-zero rows and columns in the overlapping parts of the block
-    dic_blocks = {'b_middle' : np.ones((b,b)), 
+    di_blocks = {'b_middle' : np.ones((b,b)), 
                   'b_left' : np.ones((b,b)), 
                   'b_right' : np.ones((b,b)), 
                   'b_top' : np.ones((b,b)), 
@@ -260,7 +261,7 @@ def block_overlap_gradient(corrupt, b, method):
                   'b_bottom_right' : np.ones((b,b))}
 
     for i in range(b//4):
-        for key, block in dic_blocks.items():
+        for key, block in di_blocks.items():
             if key not in ('b_left', 'b_top_left', 'b_bottom_left') :
                 block[:,i] = block[:,i] * i/factor
             if key not in ('b_right', 'b_top_right', 'b_bottom_right') :
@@ -271,9 +272,9 @@ def block_overlap_gradient(corrupt, b, method):
                 block[-1-i,:] = block[-1-i,:] * i/factor
     
     # This first paving with add_block minimizes the changes from the original algorithm.
-    # Here, only the pixels that are not already covered by the other blocks are added. all the others are put to zero.
+    # Here, only the pixels that are not already covered by the other blocks are added. all the others are put to zero. So there is no gradient
     if add_block:
-        dic_blocks_add = {'b_right_add': np.zeros((b,b)),
+        di_blocks_add = {'b_right_add': np.zeros((b,b)),
                           'b_bottom_add': np.zeros((b,b)),
                           'b_top_right_add': np.zeros((b,b)),
                           'b_bottom_left_add': np.zeros((b,b)),
@@ -281,7 +282,7 @@ def block_overlap_gradient(corrupt, b, method):
                           'b_right_corner_add': np.zeros((b,b)),
                           'b_corner_add': np.zeros((b,b))}
 
-        for key, block in dic_blocks_add.items():
+        for key, block in di_blocks_add.items():
             if 'right' in key:
                 block[:,-b//4:] = 1
             elif 'bottom' in key:
@@ -315,24 +316,24 @@ def block_overlap_gradient(corrupt, b, method):
             # Multiply by the appropriate factor matrix (middle, side or corner) before adding the block to the final image.
             if i == 0:
                 if j == 0:
-                    rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_top_left']
+                    rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*di_blocks['b_top_left']
                 elif j == l_blocks_row - 3*b//4:
-                    rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_top_right']
+                    rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*di_blocks['b_top_right']
                 else:
-                    rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_top']
+                    rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*di_blocks['b_top']
             elif i == l_blocks_row - 3*b//4:
                 if j == 0:
-                    rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_bottom_left']
+                    rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*di_blocks['b_bottom_left']
                 elif j == l_blocks_row - 3*b//4:
-                    rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_bottom_right']
+                    rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*di_blocks['b_bottom_right']
                 else:
-                    rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_bottom']
+                    rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*di_blocks['b_bottom']
             elif j == 0:
-                rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_left']
+                rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*di_blocks['b_left']
             elif j == l_blocks_row - 3*b//4:
-                rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_right']
+                rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*di_blocks['b_right']
             else:
-                rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*dic_blocks['b_middle']
+                rec_img[i:i+b,j:j+b] = rec_img[i:i+b,j:j+b] + block*di_blocks['b_middle']
     
     if add_block:
         # Block on the top right corner
@@ -340,14 +341,14 @@ def block_overlap_gradient(corrupt, b, method):
         if k%10 == 0:
             print(f"Analysis block {k}/{t_block}...")
         block_right = reconstruct_func(corrupt[:b,n-b:n])
-        rec_img[:b,n-b:n] = rec_img[:b,n-b:n] + block_right*dic_blocks_add['b_top_right_add']
+        rec_img[:b,n-b:n] = rec_img[:b,n-b:n] + block_right*di_blocks_add['b_top_right_add']
 
         # Block on the bottom left corner
         k += 1
         if k%10 == 0:
             print(f"Analysis block {k}/{t_block}...")
         block_right = reconstruct_func(corrupt[n-b:n,:b])
-        rec_img[n-b:n,:b] = rec_img[n-b:n,:b] + block_right*dic_blocks_add['b_bottom_left_add']
+        rec_img[n-b:n,:b] = rec_img[n-b:n,:b] + block_right*di_blocks_add['b_bottom_left_add']
 
         for i in range(3*b//4, l_blocks_row-3*b//4, 3*b//4):
             # Blocks on the right edge
@@ -355,35 +356,35 @@ def block_overlap_gradient(corrupt, b, method):
             if k%10 == 0:
                 print(f"Analysis block {k}/{t_block}...")
             block_right = reconstruct_func(corrupt[i:i+b,n-b:n])
-            rec_img[i:i+b,n-b:n] = rec_img[i:i+b,n-b:n] + block_right*dic_blocks_add['b_right_add']
+            rec_img[i:i+b,n-b:n] = rec_img[i:i+b,n-b:n] + block_right*di_blocks_add['b_right_add']
 
             # Blocks on the bottom edge
             k += 1
             if k&10 == 0:
                 print(f"Analysis block {k}/{t_block}...")
             block_down = reconstruct_func(corrupt[n-b:n,i:i+b])
-            rec_img[n-b:n,i:i+b] = rec_img[n-b:n,i:i+b] + block_down*dic_blocks_add['b_bottom_add']
+            rec_img[n-b:n,i:i+b] = rec_img[n-b:n,i:i+b] + block_down*di_blocks_add['b_bottom_add']
         
         # Penultimate block on the right edge
         k += 1
         if k%10 == 0:
             print(f"Analysis block {k}/{t_block}...")
         block  = reconstruct_func(corrupt[n-5*b//4:n-b//4, n-b:n])
-        rec_img[n-5*b//4:n-b//4, n-b:n] = rec_img[n-5*b//4:n-b//4, n-b:n] + block*dic_blocks_add['b_right_corner_add']
+        rec_img[n-5*b//4:n-b//4, n-b:n] = rec_img[n-5*b//4:n-b//4, n-b:n] + block*di_blocks_add['b_right_corner_add']
 
         # Penultimate block on the bottom edge
         k += 1
         if k%10 == 0:
             print(f"Analysis block {k}/{t_block}...")
         block  = reconstruct_func(corrupt[n-b:n, n-5*b//4:n-b//4])
-        rec_img[n-b:n, n-5*b//4:n-b//4] = rec_img[n-b:n, n-5*b//4:n-b//4] + block*dic_blocks_add['b_bottom_corner_add']
+        rec_img[n-b:n, n-5*b//4:n-b//4] = rec_img[n-b:n, n-5*b//4:n-b//4] + block*di_blocks_add['b_bottom_corner_add']
 
         # Block on the bottom right corner
         k += 1
         if k%10 == 0:
             print(f"Analysis block {k}/{t_block}...")
         block  = reconstruct_func(corrupt[n-b:n,n-b:n])
-        rec_img[n-b:n,n-b:n] = rec_img[n-b:n,n-b:n] + block*dic_blocks_add['b_corner_add']
+        rec_img[n-b:n,n-b:n] = rec_img[n-b:n,n-b:n] + block*di_blocks_add['b_corner_add']
     
     # Remove the pixels out of range that sometimes appear with a low coverage and the 16 px blocks
     if rec_img.max() > 500:
@@ -417,9 +418,9 @@ if __name__ == "__main__":
     IMG_DIR = os.path.join(BASE_DIR, "image")
 
     file_origin = "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145.txt"
-    file_corrupt = "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145_corrupt50_k15_s6_1.txt"
-#    file_origin = "c.txt"
-#    file_corrupt = "c4.txt"
+    file_corrupt = "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145_corrupt_row_cov50_1.txt"
+#    file_origin = "HA 2uM DOPC NTA 10 0.5mM_Sln_201202_153921.txt"
+#    file_corrupt = "HA 2uM DOPC NTA 10 0.5mM_Sln_201202_153921_corrupt_sqspiral_cov50.txt"
     len_og = len(file_origin) - 4
     suffix = file_corrupt[len_og:-4] # type of corruption
 
@@ -436,10 +437,12 @@ if __name__ == "__main__":
 
     # Reconstruct
     rec_img = block_overlap_gradient(corrupt_image, b, method)
+#    rec_img = reconstruct_tv(corrupt_image)
+
 
     # Calculation of PSNR
     n = len(rec_img)
-    max_amp = rec_img.max() - rec_img.min()
+    max_amp = 100
     mse = np.mean((image-rec_img)**2)
     psnr = 20*np.log10(max_amp) - 10*np.log10(mse)
     print("\n" + f"The PSNR between the original and reconstructed images is {'%0.2f' % psnr} dB." + "\n")
@@ -469,5 +472,5 @@ if __name__ == "__main__":
     plt.imshow(rec_img, cmap='hot')
     plt.colorbar()
 
-#    plt.savefig(os.path.join(IMG_DIR, f"{n}px_{b}px-box_{method}_overlap_gradient{suffix}.png"))
+    plt.savefig(os.path.join(IMG_DIR, f"{n}px_{b}px-box_{method}_overlap_gradient{suffix}.png"))
     plt.show()

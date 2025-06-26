@@ -24,7 +24,7 @@ def create_mask_micro(image, coverage, k, s):
     corrupt_img (array): Corrupted image composed of micro-paths measurements of length k with a minimal distance between them of s pixels and total coverage of coverage.
     
     To be noted: the k and s parameters cannot be any value and depend on the AFM.
-    In our case, k must be greater than 15 pixels and s greater than 6 pixels (4 + the 2 pixels at the ends of the micro-paths).
+    In our case, k must be greater than 15 pixels and s greater than 6 pixels (4 + the 2 pixels at the ends of the micro-paths that should be removed).
     It is limked to the time taken for the tip to go up and down. """
 
     if coverage > 1 or coverage < 0:
@@ -101,6 +101,63 @@ def create_mask_micro_unif(image, k, period, begin):
     return corrupt_img
 
 
+def create_mask_row_scan(image, coverage):
+    if coverage > 100 or coverage < 0:
+        raise ValueError("The coverage must be between 0 and 1")
+    
+    n = len(image)
+    corrupt_img = np.zeros_like(image)
+    rand_row = np.random.random(n)
+    per = np.percentile(rand_row, coverage)
+    for i in range(n):
+        if rand_row[i] <= per:
+            corrupt_img[i] = image[i]
+    return corrupt_img
+
+
+def create_mask_square_spiral(image, coverage):
+    if coverage > 0.5 or coverage < 0:
+        raise ValueError("The coverage only works for coverage between 0 and 0.5. Other values may be added in the future.")
+    
+    n = len(image)
+    corrupt_img = np.zeros_like(image)
+    period = 1
+    while not (2*coverage*period).is_integer(): # Frist multiple of 0.25 reached (possibility to change the value if needed)
+        period += 1
+        if period == 100:
+            raise ValueError(f"{coverage} is too complicated for the current algorithm. Try simpler numbers.")
+
+    n_steps = int(2 * coverage * period)
+    steps = np.zeros(n_steps, dtype=int)
+    for i in range(period):
+        steps[i%n_steps] += 1
+
+    corrupt_img[0] = image[0]
+    s = n
+    row = 0
+    col = 0
+    orientation = 0 # Top, right, bottom, left, 1, 2, 3 and 4 respectively 
+    while s >= 0:
+        if orientation%4 == 0:
+            corrupt_img[row, col:col+s] = image[row, col:col+s]
+            col = col + s - 1
+        elif orientation%4 == 1:
+            corrupt_img[row:row+s, col] = image[row:row+s, col]
+            row = row + s - 1
+        elif orientation%4 == 2:
+            corrupt_img[row, col-s+1:col+1] = image[row, col-s+1:col+1]
+            col = col - s + 1
+        else:
+            corrupt_img[row-s+1:row+1, col] = image[row-s+1:row+1, col]
+            row = row - s + 1
+        s = s - steps[orientation%n_steps]
+        orientation += 1
+    num = np.count_nonzero(corrupt_img)
+    
+    exact_cov = np.round(100*num/n**2,1)
+    error = '%.2g' % (abs(num/n**2 - coverage)/coverage * 100)
+    print(f"\nThe real coverage is {exact_cov} %. \nThe error from the expected coverage is {error} %.")
+    return corrupt_img
 
 
 
@@ -122,7 +179,7 @@ if __name__ == "__main__":
 
 
     # Type of corrupt image. For now u-paths or quarter
-    c_type = 'unif' 
+    c_type = 'row scan' 
 
     if c_type == 'quarter':
         begin = 1 # Possible values: 1, 2, 3 or 4 to select which first point to select in the top left 2x2 square of the image
@@ -140,8 +197,16 @@ if __name__ == "__main__":
         begin = 1 # Integer between 1 and 'period'. Line of the pattern from which to start.
         extension = f"_unif_k{k}_per{period}_{begin}"
         corrupt_img = create_mask_micro_unif(image, k, period, begin)
+    elif c_type == 'row scan':
+        coverage = 0.5 # Fraction of the rows measured
+        extension = f"_row_cov{str(int(coverage*100))}_1"
+        corrupt_img = create_mask_row_scan(image, int(coverage*100))
+    elif c_type == 'square spiral':
+        coverage = 0.3 # Should be between 0 and 0.5. It currently works for 0.1, 0.2, 0.25, 0.3, 0.4 and 0.5 for sure. Other values may give strange results.
+        extension = f"_sqspiral_cov{str(int(coverage*100))}"
+        corrupt_img = create_mask_square_spiral(image, coverage)
     else:
-        raise ValueError(f"the algorithm {c_type} is not recognized. Try 'quarter', 'unif' or 'u-paths' instead.")
+        raise ValueError(f"the algorithm {c_type} is not recognized. Try 'quarter', 'unif', 'row scan', 'square spiral' or 'u-paths' instead.")
 
 
     # Comparison plot between original and corrupted images
@@ -149,7 +214,7 @@ if __name__ == "__main__":
     norm = ax1.imshow(image, cmap="hot")
     corrupt = ax2.imshow(corrupt_img, cmap='hot')
     fig.colorbar(corrupt, label='Height (%)', location="right")
-    fig.suptitle('Comparaison')
+    fig.suptitle('Comparison')
     plt.show()
 
 
