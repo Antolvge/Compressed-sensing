@@ -26,7 +26,7 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 #partial_image = load_afm_txt(os.path.join(DATA_DIR, "HA 2uM DOPC NTA 10 0.5mM_Sln_201202_153921_corrupt_quarter.txt"))
 
 full_image = load_afm_txt(os.path.join(DATA_DIR, "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145.txt"))
-partial_image = load_afm_txt(os.path.join(DATA_DIR, "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145_corrupt_quarter.txt"))
+partial_image = load_afm_txt(os.path.join(DATA_DIR, "1_TMV_0.1_Au_TSGs_RH10__amp 2V_150701_114145_corrupt_sqspiral_cov30.txt"))
 
 #full_image = load_afm_txt(os.path.join(DATA_DIR, "c.txt"))
 #partial_image = load_afm_txt(os.path.join(DATA_DIR, "c4.txt"))
